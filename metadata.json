@@ -1,0 +1,6 @@
+{
+  "name": "Gestionnaire de Gardes",
+  "description": "A reporting tool for night guards to track emergency calls and bonus eligibility with monthly summaries, PDF exports, and automatic NAS schedule synchronization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

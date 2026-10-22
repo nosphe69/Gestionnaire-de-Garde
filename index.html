@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#10b981" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/png" href="https://img.icons8.com/fluency/48/medical-cross.png" />
+    <title>Gestionnaire de Gardes</title>
+    <meta name="description" content="A reporting tool for night guards to track emergency calls and bonus eligibility with monthly summaries, PDF exports, and automatic NAS schedule synchronization." />
+    <meta property="og:title" content="Gestionnaire de Gardes" />
+    <meta property="og:description" content="A reporting tool for night guards to track emergency calls and bonus eligibility with monthly summaries, PDF exports, and automatic NAS schedule synchronization." />
+  </head>
+  <body>
+    <div id="root">
+      <div style="background: #09090b; color: #71717a; height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: sans-serif;">
+        <div style="width: 40px; height: 40px; border: 3px solid #27272a; border-top-color: #10b981; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 1rem;"></div>
+        <p id="loading-text">Chargement de l'application...</p>
+        <div id="loading-timeout" style="display: none; margin-top: 1rem; text-align: center;">
+          <p style="color: #a1a1aa; font-size: 0.875rem; margin-bottom: 1rem;">Le chargement prend plus de temps que prévu...</p>
+          <button onclick="localStorage.clear(); location.reload();" style="background: #3f3f46; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; font-size: 0.875rem; cursor: pointer;">Réinitialiser et recharger</button>
+        </div>
+        <script>
+          // Show timeout message after 10 seconds if still loading
+          setTimeout(() => {
+            const timeoutDiv = document.getElementById('loading-timeout');
+            if (timeoutDiv && document.getElementById('loading-text')) {
+              timeoutDiv.style.display = 'block';
+            }
+          }, 10000);
+        </script>
+        <style>
+          @keyframes spin { to { transform: rotate(360deg); } }
+        </style>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

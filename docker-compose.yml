@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  gestionnaire-gardes:
+    build: .
+    container_name: gestionnaire-gardes
+    restart: always
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+      # Montage en lecture seule du répertoire des plannings sur votre NAS Synology
+      - "/volume1/Plannings_Cloud/Planning de Garde laboratoire/plannings:/volume1/Plannings_Cloud/Planning de Garde laboratoire/plannings:ro"
+    environment:
+      - NODE_ENV=production
+      - DB_PATH=/app/data/guards.db
+      - PLANNINGS_DIR=/volume1/Plannings_Cloud/Planning de Garde laboratoire/plannings
+      - PORT=3000
+      # Variables optionnelles pour les emails
+      # - EMAIL_USER=votre-email@gmail.com
+      # - EMAIL_PASS=votre-mot-de-passe-app
