@@ -2670,10 +2670,13 @@ volumes:
                   <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-300 space-y-1">
                     <p className="font-semibold flex items-center gap-1.5 text-emerald-400">
                       <CheckCircle2 size={14} />
-                      Règle automatique de garde :
+                      Format officiel pris en charge :
                     </p>
                     <p className="text-zinc-300">
-                      Les gardes sont affectées à chaque jour. Pour les <strong>dimanches et jours fériés</strong>, seule la <strong>garde de nuit (19h00 à 07h00)</strong> est enregistrée.
+                      Détection automatique de votre grille mensuelle : jours en colonnes, numéro dans la ligne <strong>DATE</strong> et intervenant d'astreinte dans la ligne <strong>NUIT</strong> (avec repli sur GARDE si besoin).
+                    </p>
+                    <p className="text-zinc-400 text-[11px] italic">
+                      Pour les dimanches et jours fériés, la garde de nuit (19h-07h) est automatiquement privilégiée.
                     </p>
                   </div>
 

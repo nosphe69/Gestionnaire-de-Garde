@@ -110,14 +110,52 @@ try {
     "2026-08-31": "JOCELENE"
   };
 
+  // Seed official October 2026 planning roster (from PLANNING DE GARDE - OCTOBRE 2026)
+  const october2026Roster: Record<string, string> = {
+    "2026-10-01": "WAHIBA",
+    "2026-10-02": "LETTICIA",
+    "2026-10-03": "STEPHANE",
+    "2026-10-04": "STEPHANE",
+    "2026-10-05": "JOCELENE",
+    "2026-10-06": "LETTICIA",
+    "2026-10-07": "MOURAD",
+    "2026-10-08": "STEPHANE",
+    "2026-10-09": "LETTICIA",
+    "2026-10-10": "JEAN-REMY",
+    "2026-10-11": "JEAN-REMY",
+    "2026-10-12": "JOCELENE",
+    "2026-10-13": "STEPHANE",
+    "2026-10-14": "MOURAD",
+    "2026-10-15": "WAHIBA",
+    "2026-10-16": "JOSEPH",
+    "2026-10-17": "JOCELENE",
+    "2026-10-18": "JOCELENE",
+    "2026-10-19": "JOCELENE",
+    "2026-10-20": "JOSEPH",
+    "2026-10-21": "MOURAD",
+    "2026-10-22": "STEPHANE",
+    "2026-10-23": "LETTICIA",
+    "2026-10-24": "STEPHANE",
+    "2026-10-25": "STEPHANE",
+    "2026-10-26": "JOCELENE",
+    "2026-10-27": "LETTICIA",
+    "2026-10-28": "STEPHANE",
+    "2026-10-29": "WAHIBA",
+    "2026-10-30": "STEPHANE",
+    "2026-10-31": "WAHIBA"
+  };
+
   const insertDuty = db.prepare("INSERT OR REPLACE INTO scheduled_duties (date, note, updated_at) VALUES (?, ?, ?)");
   const nowStr = new Date().toISOString();
   db.transaction(() => {
     for (const [dKey, name] of Object.entries(august2026Roster)) {
       insertDuty.run(dKey, name, nowStr);
     }
+    for (const [dKey, name] of Object.entries(october2026Roster)) {
+      insertDuty.run(dKey, name, nowStr);
+    }
   })();
-  console.log(">>> AUGUST 2026 SCHEDULED DUTIES SEEDED");
+  console.log(">>> AUGUST & OCTOBER 2026 SCHEDULED DUTIES SEEDED");
 } catch (err) {
   console.error(">>> DATABASE INITIALIZATION FAILED:", err);
 }
@@ -888,29 +926,223 @@ async function startServer() {
     return null;
   }
 
-  // Parse Excel or CSV buffer natively (zero API, zero external cost, ultra fast)
+  // Helper: Extract duties from a calendar grid matrix sheet (e.g., "PLANNING DE GARDE - OCTOBRE 2026")
+  // where weekdays (Lundi..Dimanche) are in columns, and each week block contains:
+  // - DATE row (with day numbers 1..31)
+  // - GARDE row (optional daytime guard)
+  // - DOUBLAGE row (optional backup)
+  // - NUIT row (on-call doctor/practitioner for the night)
+  function parseCalendarGridSheet(sheet: XLSX.WorkSheet, defaultYearMonth?: string): Array<{ date: string; person: string }> {
+    const rawData: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" }) as any[][];
+    if (!rawData || rawData.length === 0) return [];
+
+    let detectedYear: number | null = null;
+    let detectedMonth: number | null = null;
+
+    if (defaultYearMonth && /^\d{4}-\d{2}$/.test(defaultYearMonth)) {
+      const parts = defaultYearMonth.split("-");
+      detectedYear = parseInt(parts[0], 10);
+      detectedMonth = parseInt(parts[1], 10);
+    }
+
+    const monthMapFr: Record<string, number> = {
+      "janvier": 1, "janv": 1, "jan": 1,
+      "fevrier": 2, "fevr": 2, "fev": 2,
+      "mars": 3, "mar": 3,
+      "avril": 4, "avr": 4,
+      "mai": 5,
+      "juin": 6,
+      "juillet": 7, "juil": 7,
+      "aout": 8, "aou": 8,
+      "septembre": 9, "sept": 9, "sep": 9,
+      "octobre": 10, "oct": 10,
+      "novembre": 11, "nov": 11,
+      "decembre": 12, "dec": 12
+    };
+
+    // Scan top 15 rows for month name and year (e.g., "PLANNING DE GARDE - OCTOBRE 2026")
+    for (let r = 0; r < Math.min(15, rawData.length); r++) {
+      const row = rawData[r];
+      if (!Array.isArray(row)) continue;
+      for (const cell of row) {
+        if (!cell) continue;
+        const cellStr = String(cell).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        for (const [mName, mNum] of Object.entries(monthMapFr)) {
+          if (cellStr.includes(mName)) {
+            const yrMatch = cellStr.match(/20\d{2}/);
+            if (yrMatch) {
+              detectedYear = parseInt(yrMatch[0], 10);
+              detectedMonth = mNum;
+              break;
+            } else if (!detectedMonth) {
+              detectedMonth = mNum;
+            }
+          }
+        }
+        if (detectedYear && detectedMonth) break;
+      }
+      if (detectedYear && detectedMonth) break;
+    }
+
+    if (!detectedYear) detectedYear = new Date().getFullYear();
+    if (!detectedMonth) detectedMonth = new Date().getMonth() + 1;
+
+    function cleanPersonName(raw: any): string {
+      if (!raw) return "";
+      let s = String(raw).trim();
+      s = s.replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim();
+      const norm = s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      if (["", "-", "--", "/", "\\", "x", "xx", "ferie", "repos", "vide", "aucun", "libre", "non", "conge", "conges"].includes(norm)) {
+        return "";
+      }
+      return s.toUpperCase();
+    }
+
+    const gridDuties: Array<{ date: string; person: string }> = [];
+
+    // Scan for DATE rows
+    for (let r = 0; r < rawData.length; r++) {
+      const row = rawData[r];
+      if (!Array.isArray(row) || row.length === 0) continue;
+
+      let isDateRow = false;
+      let dateLabelCol = -1;
+
+      for (let c = 0; c < Math.min(4, row.length); c++) {
+        const valNorm = String(row[c] || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        if (valNorm === "date" || valNorm === "dates" || valNorm.startsWith("date")) {
+          isDateRow = true;
+          dateLabelCol = c;
+          break;
+        }
+      }
+
+      if (!isDateRow) continue;
+
+      // Locate NUIT, GARDE, DOUBLAGE rows in this week block
+      let nuitRowIdx = -1;
+      let gardeRowIdx = -1;
+      let doublageRowIdx = -1;
+
+      for (let nextR = r + 1; nextR < Math.min(r + 8, rawData.length); nextR++) {
+        const subRow = rawData[nextR];
+        if (!Array.isArray(subRow)) continue;
+
+        // Stop if next DATE row begins
+        let isNextDateRow = false;
+        for (let c = 0; c < Math.min(4, subRow.length); c++) {
+          const valNorm = String(subRow[c] || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+          if (valNorm === "date" || valNorm === "dates" || valNorm.startsWith("date")) {
+            isNextDateRow = true;
+            break;
+          }
+        }
+        if (isNextDateRow) break;
+
+        for (let c = 0; c < Math.min(4, subRow.length); c++) {
+          const valNorm = String(subRow[c] || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+          if (valNorm === "nuit" || valNorm === "nuits" || valNorm.startsWith("nuit")) {
+            nuitRowIdx = nextR;
+          } else if (valNorm === "garde" || valNorm === "gardes" || valNorm.startsWith("garde")) {
+            gardeRowIdx = nextR;
+          } else if (valNorm === "doublage" || valNorm.startsWith("doubl")) {
+            doublageRowIdx = nextR;
+          }
+        }
+      }
+
+      // Read day numbers and corresponding duty persons across columns
+      const startCol = dateLabelCol + 1;
+      for (let c = startCol; c < row.length; c++) {
+        const cell = row[c];
+        if (cell === null || cell === undefined || cell === "") continue;
+
+        let dayNum: number | null = null;
+
+        if (typeof cell === "number") {
+          if (cell >= 1 && cell <= 31) {
+            dayNum = Math.floor(cell);
+          } else if (cell > 30000 && cell < 60000) {
+            try {
+              const parsed = (XLSX.SSF as any).parse_date_code(cell);
+              if (parsed && parsed.d) {
+                dayNum = parsed.d;
+                if (parsed.y) detectedYear = parsed.y;
+                if (parsed.m) detectedMonth = parsed.m;
+              }
+            } catch (e) {}
+          }
+        } else if (cell instanceof Date && !isNaN(cell.getTime())) {
+          dayNum = cell.getDate();
+          detectedYear = cell.getFullYear();
+          detectedMonth = cell.getMonth() + 1;
+        } else {
+          const str = String(cell).trim();
+          const match = str.match(/^0?([1-9]|[12]\d|3[01])$/);
+          if (match) {
+            dayNum = parseInt(match[1], 10);
+          }
+        }
+
+        if (!dayNum || dayNum < 1 || dayNum > 31) continue;
+
+        // Take person from NUIT row as primary, fallback to GARDE row if NUIT is blank
+        let person = "";
+        if (nuitRowIdx !== -1 && rawData[nuitRowIdx] && rawData[nuitRowIdx][c] !== undefined) {
+          person = cleanPersonName(rawData[nuitRowIdx][c]);
+        }
+        if (!person && gardeRowIdx !== -1 && rawData[gardeRowIdx] && rawData[gardeRowIdx][c] !== undefined) {
+          person = cleanPersonName(rawData[gardeRowIdx][c]);
+        }
+
+        if (person) {
+          const dateStr = `${detectedYear}-${String(detectedMonth).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`;
+          gridDuties.push({ date: dateStr, person });
+        }
+      }
+    }
+
+    return gridDuties;
+  }
+
+  // Parse Excel or CSV buffer natively (supports both calendar grid matrix and list formats)
   function parseExcelSchedule(fileBuffer: Buffer, targetMonth?: string): Array<{ date: string; person: string }> {
     const workbook = XLSX.read(fileBuffer, { type: "buffer", cellDates: true });
     const sheetNames = workbook.SheetNames;
     if (!sheetNames || sheetNames.length === 0) return [];
 
-    let selectedSheet = workbook.Sheets[sheetNames[0]];
+    // Order sheets: check sheet matching targetMonth first, then all others
+    const sheetsToTry = [...sheetNames];
     if (targetMonth) {
       const [y, m] = targetMonth.split("-");
       const mVariants = MONTH_NAMES_FR[m] || [];
-      for (const sName of sheetNames) {
-        const lower = sName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        if (
-          lower.includes(`${y}-${m}`) || 
-          lower.includes(`${m}-${y}`) || 
-          mVariants.some(v => lower.includes(v))
-        ) {
-          selectedSheet = workbook.Sheets[sName];
-          break;
+      sheetsToTry.sort((a, b) => {
+        const aLow = a.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        const bLow = b.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        const aMatch = aLow.includes(`${y}-${m}`) || aLow.includes(`${m}-${y}`) || mVariants.some(v => aLow.includes(v));
+        const bMatch = bLow.includes(`${y}-${m}`) || bLow.includes(`${m}-${y}`) || mVariants.some(v => bLow.includes(v));
+        return (bMatch ? 1 : 0) - (aMatch ? 1 : 0);
+      });
+    }
+
+    // 1. Try Calendar Grid Matrix parsing on sheets (standard format: weekdays in header, rows DATE/GARDE/DOUBLAGE/NUIT)
+    for (const sName of sheetsToTry) {
+      const sheet = workbook.Sheets[sName];
+      if (!sheet) continue;
+      const gridDuties = parseCalendarGridSheet(sheet, targetMonth);
+      if (gridDuties && gridDuties.length >= 3) {
+        const map = new Map<string, string>();
+        for (const item of gridDuties) {
+          map.set(item.date, item.person);
         }
+        return Array.from(map.entries())
+          .map(([date, person]) => ({ date, person }))
+          .sort((a, b) => a.date.localeCompare(b.date));
       }
     }
 
+    // 2. Fallback: Tabular row-by-row parser (columns Date, Intervenant, etc.)
+    let selectedSheet = workbook.Sheets[sheetsToTry[0]];
     const rows: any[] = XLSX.utils.sheet_to_json(selectedSheet, { raw: false, defval: "" });
     if (!rows || rows.length === 0) return [];
 
